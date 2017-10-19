@@ -9,13 +9,29 @@ class Block(object):
         self.depth = depth
         self.text = ""
         self.key = ''.join(random.choice(string.ascii_lowercase + string.digits) for _ in range(5))
+        self.inline_style_ranges = []
 
     def as_dict(self):
         return {
             'key': self.key,
             'type': self.type,
             'depth': self.depth,
-            'text': self.text
+            'text': self.text,
+            'inlineStyleRanges': [isr.as_dict() for isr in self.inline_style_ranges]
+        }
+
+
+class InlineStyleRange(object):
+    def __init__(self, style):
+        self.style = style
+        self.offset = None
+        self.length = None
+
+    def as_dict(self):
+        return {
+            'offset': self.offset,
+            'length': self.length,
+            'style': self.style
         }
 
 

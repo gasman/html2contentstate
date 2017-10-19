@@ -1,7 +1,7 @@
 import io
 import xml.sax
 
-from contentstate import Block, ContentState
+from contentstate import Block, ContentState, InlineStyleRange
 
 
 LIST_ELEMENTS = {
@@ -19,7 +19,12 @@ BLOCK_ELEMENTS = {
     'img': 'atomic',
     'li': None
 }
-NESTABLE_BLOCK_ELEMENTS = ['li']
+INLINE_STYLE_ELEMENTS = {
+    'i': 'ITALIC',
+    'em': 'ITALIC',
+    'b': 'BOLD',
+    'strong': 'BOLD',
+}
 
 
 class HtmlToContentStateHandler(xml.sax.ContentHandler):
@@ -32,6 +37,7 @@ class HtmlToContentStateHandler(xml.sax.ContentHandler):
             'depth': 0,
             'list-item-type': None
         }
+        self.current_inline_styles = []
 
         super(HtmlToContentStateHandler, self).__init__()
 
@@ -81,6 +87,13 @@ class HtmlToContentStateHandler(xml.sax.ContentHandler):
                     depth=self.state['depth']
                 ))
 
+        elif name in INLINE_STYLE_ELEMENTS:
+            assert self.current_block is not None, "%s tag found at the top level" % name
+            inline_style_range = InlineStyleRange(INLINE_STYLE_ELEMENTS[name])
+            inline_style_range.offset = len(self.current_block.text)
+            self.current_block.inline_style_ranges.append(inline_style_range)
+            self.current_inline_styles.append(inline_style_range)
+
         else:
             print("[%s]" % name)
 
@@ -90,7 +103,13 @@ class HtmlToContentStateHandler(xml.sax.ContentHandler):
             self.pop_state()
 
         elif name in BLOCK_ELEMENTS:
+            assert not self.current_inline_styles, "End of block reached without closing inline style elements"
             self.current_block = None
+
+        elif name in INLINE_STYLE_ELEMENTS:
+            inline_style_range = self.current_inline_styles.pop()
+            assert inline_style_range.style == INLINE_STYLE_ELEMENTS[name]
+            inline_style_range.length = len(self.current_block.text) - inline_style_range.offset
 
         else:
             print("[/%s]" % name)
