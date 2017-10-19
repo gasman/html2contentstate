@@ -84,5 +84,5 @@ class ContentState(object):
             'entityMap': {key: entity.as_dict() for (key, entity) in self.entity_map.items()},
         }
 
-    def as_json(self):
-        return json.dumps(self.as_dict())
+    def as_json(self, **kwargs):
+        return json.dumps(self.as_dict(), **kwargs)

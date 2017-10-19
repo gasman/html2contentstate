@@ -24,4 +24,4 @@ html = """
 
 from html2contentstate import convert
 
-print(convert(html))
+print(convert(html, indent=4, separators=(',', ': ')))

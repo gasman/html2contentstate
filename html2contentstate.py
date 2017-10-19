@@ -201,7 +201,7 @@ class HtmlToContentStateHandler(xml.sax.ContentHandler):
             self.state.current_block.text += content
 
 
-def convert(html):
+def convert(html, **kwargs):
     parser = xml.sax.make_parser()
     handler = HtmlToContentStateHandler()
     parser.setContentHandler(handler)
@@ -210,4 +210,4 @@ def convert(html):
     # container element so that sax will accept it as a valid XML document
     parser.parse(io.StringIO("<rich-text-document>%s</rich-text-document>" % html))
 
-    return handler.contentstate.as_json()
+    return handler.contentstate.as_json(**kwargs)
