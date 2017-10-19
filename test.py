@@ -21,4 +21,4 @@ html = """
 
 from html2contentstate import convert
 
-print(repr(convert(html)))
+print(convert(html))

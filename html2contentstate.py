@@ -4,122 +4,148 @@ import xml.sax
 from contentstate import Block, ContentState, InlineStyleRange
 
 
-LIST_ELEMENTS = {
-    'ol': 'ordered-list-item',
-    'ul': 'unordered-list-item'
-}
-BLOCK_ELEMENTS = {
-    'h1': 'header-one',
-    'h2': 'header-two',
-    'h3': 'header-three',
-    'h4': 'header-four',
-    'h5': 'header-five',
-    'h6': 'header-six',
-    'p': 'unstyled',
-    'img': 'atomic',
-    'li': None
-}
-INLINE_STYLE_ELEMENTS = {
-    'i': 'ITALIC',
-    'em': 'ITALIC',
-    'b': 'BOLD',
-    'strong': 'BOLD',
+class HandlerState(object):
+    def __init__(self):
+        self.current_block = None
+        self.current_inline_styles = []
+        self.depth = 0
+        self.list_item_type = None
+        self.pushed_states = []
+
+    def push(self):
+        self.pushed_states.append({
+            'current_block': self.current_block,
+            'current_inline_styles': self.current_inline_styles,
+            'depth': self.depth,
+            'list_item_type': self.list_item_type
+        })
+
+    def pop(self):
+        last_state = self.pushed_states.pop()
+        self.current_block = last_state['current_block']
+        self.current_inline_styles = last_state['current_inline_styles']
+        self.depth = last_state['depth']
+        self.list_item_type = last_state['list_item_type']
+
+
+class ListElementHandler(object):
+    """ Handler for <ul> / <ol> tags """
+    def __init__(self, list_item_type):
+        self.list_item_type = list_item_type
+
+    def startElement(self, name, attrs, state, contentstate):
+        state.push()
+
+        if state.list_item_type is None:
+            # this is not nested in another list => depth remains unchanged
+            pass
+        else:
+            # start the next nesting level
+            state.depth += 1
+
+        state.list_item_type = self.list_item_type
+
+    def endElement(self, name, state, contentstate):
+        state.pop()
+
+
+class BlockElementHandler(object):
+    def __init__(self, block_type):
+        self.block_type = block_type
+
+    def create_block(self, name, attrs, state, contentstate):
+        assert state.depth == 0, "%s element found nested inside a list" % name
+        return Block(self.block_type, depth=state.depth)
+
+    def startElement(self, name, attrs, state, contentstate):
+        block = self.create_block(name, attrs, state, contentstate)
+        contentstate.blocks.append(block)
+        state.current_block = block
+
+    def endElement(self, name, state, contentState):
+        assert not state.current_inline_styles, "End of block reached without closing inline style elements"
+        state.current_block = None
+
+
+class ListItemElementHandler(BlockElementHandler):
+    """ Handler for <li> tag """
+
+    def __init__(self):
+        pass  # skip setting self.block_type
+
+    def create_block(self, name, attrs, state, contentstate):
+        assert state.list_item_type is not None, "%s element found outside of an enclosing list element" % name
+        return Block(state.list_item_type, depth=state.depth)
+
+
+class InlineStyleElementHandler(object):
+    def __init__(self, style):
+        self.style = style
+
+    def startElement(self, name, attrs, state, contentstate):
+        assert state.current_block is not None, "%s element found at the top level" % name
+        inline_style_range = InlineStyleRange(self.style)
+        inline_style_range.offset = len(state.current_block.text)
+        state.current_block.inline_style_ranges.append(inline_style_range)
+        state.current_inline_styles.append(inline_style_range)
+
+    def endElement(self, name, state, contentstate):
+        inline_style_range = state.current_inline_styles.pop()
+        assert inline_style_range.style == self.style
+        inline_style_range.length = len(state.current_block.text) - inline_style_range.offset
+
+
+ELEMENT_HANDLERS = {
+    'ol': ListElementHandler('ordered-list-item'),
+    'ul': ListElementHandler('unordered-list-item'),
+    'li': ListItemElementHandler(),
+    'h1': BlockElementHandler('header-one'),
+    'h2': BlockElementHandler('header-two'),
+    'h3': BlockElementHandler('header-three'),
+    'h4': BlockElementHandler('header-four'),
+    'h5': BlockElementHandler('header-five'),
+    'h6': BlockElementHandler('header-six'),
+    'p': BlockElementHandler('unstyled'),
+    'img': BlockElementHandler('atomic'),
+    'i': InlineStyleElementHandler('ITALIC'),
+    'em': InlineStyleElementHandler('ITALIC'),
+    'b': InlineStyleElementHandler('BOLD'),
+    'strong': InlineStyleElementHandler('BOLD'),
 }
 
 
 class HtmlToContentStateHandler(xml.sax.ContentHandler):
     def __init__(self):
+        self.state = HandlerState()
         self.contentstate = ContentState()
-        self.current_block = None
-
-        self.previous_states = []
-        self.state = {
-            'depth': 0,
-            'list-item-type': None
-        }
-        self.current_inline_styles = []
-
         super(HtmlToContentStateHandler, self).__init__()
-
-    def push_state(self, new_state):
-        self.previous_states.append(self.state)
-        self.state = new_state
-
-    def pop_state(self):
-        self.state = self.previous_states.pop()
 
     def add_block(self, block):
         self.contentstate.blocks.append(block)
         self.current_block = block
 
     def startElement(self, name, attrs):
-        if name in LIST_ELEMENTS:
-            # A <ul> or <ol> element does not create any new blocks itself;
-            # it merely updates the state so that any <li> elements we subsequently
-            # encounter will have the appropriate list element type and depth assigned
-            # on the resulting block
-            if self.state['list-item-type'] is None:
-                # this is not nested in another list => depth remains unchanged
-                new_depth = self.state['depth']
-            else:
-                # start the next nesting level
-                new_depth = self.state['depth'] + 1
+        try:
+            element_handler = ELEMENT_HANDLERS[name]
+        except KeyError:
+            return  # ignore unrecognised elements
 
-            self.push_state({
-                'depth': new_depth,
-                'list-item-type': LIST_ELEMENTS[name]
-            })
-
-        elif name in BLOCK_ELEMENTS:
-            # start a new block
-
-            if name == 'li':
-                assert self.state['list-item-type'] is not None, "<li> found outside of an enclosing list element"
-                self.add_block(Block(
-                    self.state['list-item-type'],
-                    depth=self.state['depth']
-                ))
-
-            else:
-                assert self.state['depth'] == 0, "%s tag found nested inside a list" % name
-                self.add_block(Block(
-                    BLOCK_ELEMENTS[name],
-                    depth=self.state['depth']
-                ))
-
-        elif name in INLINE_STYLE_ELEMENTS:
-            assert self.current_block is not None, "%s tag found at the top level" % name
-            inline_style_range = InlineStyleRange(INLINE_STYLE_ELEMENTS[name])
-            inline_style_range.offset = len(self.current_block.text)
-            self.current_block.inline_style_ranges.append(inline_style_range)
-            self.current_inline_styles.append(inline_style_range)
-
-        else:
-            print("[%s]" % name)
+        element_handler.startElement(name, attrs, self.state, self.contentstate)
 
     def endElement(self, name):
-        if name in LIST_ELEMENTS:
-            assert LIST_ELEMENTS[name] == self.state['list-item-type']
-            self.pop_state()
+        try:
+            element_handler = ELEMENT_HANDLERS[name]
+        except KeyError:
+            return  # ignore unrecognised elements
 
-        elif name in BLOCK_ELEMENTS:
-            assert not self.current_inline_styles, "End of block reached without closing inline style elements"
-            self.current_block = None
-
-        elif name in INLINE_STYLE_ELEMENTS:
-            inline_style_range = self.current_inline_styles.pop()
-            assert inline_style_range.style == INLINE_STYLE_ELEMENTS[name]
-            inline_style_range.length = len(self.current_block.text) - inline_style_range.offset
-
-        else:
-            print("[/%s]" % name)
+        element_handler.endElement(name, self.state, self.contentstate)
 
     def characters(self, content):
-        if self.current_block is None:
+        if self.state.current_block is None:
             assert not content.strip(), "Bare text content found at the top level: %r" % content
 
         else:
-            self.current_block.text += content
+            self.state.current_block.text += content
 
 
 def convert(html):
