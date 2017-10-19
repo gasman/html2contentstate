@@ -1,7 +1,7 @@
 import io
-import random
-import string
 import xml.sax
+
+from contentstate import Block, ContentState
 
 
 LIST_ELEMENTS = {
@@ -22,25 +22,9 @@ BLOCK_ELEMENTS = {
 NESTABLE_BLOCK_ELEMENTS = ['li']
 
 
-class Block(object):
-    def __init__(self, typ, depth=0):
-        self.type = typ
-        self.depth = depth
-        self.text = ""
-        self.key = ''.join(random.choice(string.ascii_lowercase + string.digits) for _ in range(5))
-
-    def as_dict(self):
-        return {
-            'key': self.key,
-            'type': self.type,
-            'depth': self.depth,
-            'text': self.text
-        }
-
-
 class HtmlToContentStateHandler(xml.sax.ContentHandler):
     def __init__(self):
-        self.blocks = []
+        self.contentstate = ContentState()
         self.current_block = None
 
         self.previous_states = []
@@ -59,7 +43,7 @@ class HtmlToContentStateHandler(xml.sax.ContentHandler):
         self.state = self.previous_states.pop()
 
     def add_block(self, block):
-        self.blocks.append(block)
+        self.contentstate.blocks.append(block)
         self.current_block = block
 
     def startElement(self, name, attrs):
@@ -118,12 +102,6 @@ class HtmlToContentStateHandler(xml.sax.ContentHandler):
         else:
             self.current_block.text += content
 
-    def get_contentstate_json(self):
-        return {
-            'blocks': [block.as_dict() for block in self.blocks],
-            'entityMap': {},
-        }
-
 
 def convert(html):
     parser = xml.sax.make_parser()
@@ -134,4 +112,4 @@ def convert(html):
     # container element so that sax will accept it as a valid XML document
     parser.parse(io.StringIO("<rich-text-document>%s</rich-text-document>" % html))
 
-    return handler.get_contentstate_json()
+    return handler.contentstate.as_json()
