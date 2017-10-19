@@ -57,7 +57,7 @@ class BlockElementHandler(object):
         self.block_type = block_type
 
     def create_block(self, name, attrs, state, contentstate):
-        assert state.depth == 0, "%s element found nested inside a list" % name
+        assert state.current_block is None, "%s element found nested inside another block" % name
         return Block(self.block_type, depth=state.depth)
 
     def startElement(self, name, attrs, state, contentstate):
@@ -119,6 +119,25 @@ class LinkElementHandler(object):
         entity_range.length = len(state.current_block.text) - entity_range.offset
 
 
+class ImageElementHandler(object):
+    def startElement(self, name, attrs, state, contentstate):
+        assert state.current_block is None, "%s element found nested inside another block" % name
+
+        entity = Entity('IMAGE', 'IMMUTABLE', {'altText': attrs.get('alt'), 'src': attrs['src']})
+        key = contentstate.add_entity(entity)
+
+        block = Block('atomic', depth=state.depth)
+        contentstate.blocks.append(block)
+        block.text = ' '
+        entity_range = EntityRange(key)
+        entity_range.offset = 0
+        entity_range.length = 1
+        block.entity_ranges.append(entity_range)
+
+    def endElement(self, name, state, contentstate):
+        pass
+
+
 ELEMENT_HANDLERS = {
     'ol': ListElementHandler('ordered-list-item'),
     'ul': ListElementHandler('unordered-list-item'),
@@ -136,6 +155,7 @@ ELEMENT_HANDLERS = {
     'b': InlineStyleElementHandler('BOLD'),
     'strong': InlineStyleElementHandler('BOLD'),
     'a': LinkElementHandler('LINK'),
+    'img': ImageElementHandler(),
 }
 
 
