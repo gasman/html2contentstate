@@ -119,11 +119,14 @@ class LinkElementHandler(object):
         entity_range.length = len(state.current_block.text) - entity_range.offset
 
 
-class ImageElementHandler(object):
+class AtomicBlockEntityElementHandler(object):
+    """
+    Handler for elements like <img> that exist as a single immutable item at the block level
+    """
     def startElement(self, name, attrs, state, contentstate):
         assert state.current_block is None, "%s element found nested inside another block" % name
 
-        entity = Entity('IMAGE', 'IMMUTABLE', {'altText': attrs.get('alt'), 'src': attrs['src']})
+        entity = self.create_entity(name, attrs, state, contentstate)
         key = contentstate.add_entity(entity)
 
         block = Block('atomic', depth=state.depth)
@@ -136,6 +139,11 @@ class ImageElementHandler(object):
 
     def endElement(self, name, state, contentstate):
         pass
+
+
+class ImageElementHandler(AtomicBlockEntityElementHandler):
+    def create_entity(self, name, attrs, state, contentstate):
+        return Entity('IMAGE', 'IMMUTABLE', {'altText': attrs.get('alt'), 'src': attrs['src']})
 
 
 ELEMENT_HANDLERS = {
