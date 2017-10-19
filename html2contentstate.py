@@ -1,13 +1,14 @@
 import io
 import xml.sax
 
-from contentstate import Block, ContentState, InlineStyleRange
+from contentstate import Block, ContentState, Entity, EntityRange, InlineStyleRange
 
 
 class HandlerState(object):
     def __init__(self):
         self.current_block = None
         self.current_inline_styles = []
+        self.current_entity_ranges = []
         self.depth = 0
         self.list_item_type = None
         self.pushed_states = []
@@ -16,6 +17,7 @@ class HandlerState(object):
         self.pushed_states.append({
             'current_block': self.current_block,
             'current_inline_styles': self.current_inline_styles,
+            'current_entity_ranges': self.current_entity_ranges,
             'depth': self.depth,
             'list_item_type': self.list_item_type
         })
@@ -24,6 +26,7 @@ class HandlerState(object):
         last_state = self.pushed_states.pop()
         self.current_block = last_state['current_block']
         self.current_inline_styles = last_state['current_inline_styles']
+        self.current_entity_ranges = last_state['current_entity_ranges']
         self.depth = last_state['depth']
         self.list_item_type = last_state['list_item_type']
 
@@ -64,6 +67,7 @@ class BlockElementHandler(object):
 
     def endElement(self, name, state, contentState):
         assert not state.current_inline_styles, "End of block reached without closing inline style elements"
+        assert not state.current_entity_ranges, "End of block reached without closing entity elements"
         state.current_block = None
 
 
@@ -95,6 +99,26 @@ class InlineStyleElementHandler(object):
         inline_style_range.length = len(state.current_block.text) - inline_style_range.offset
 
 
+class LinkElementHandler(object):
+    def __init__(self, entity_type):
+        self.entity_type = entity_type
+
+    def startElement(self, name, attrs, state, contentstate):
+        assert state.current_block is not None, "%s element found at the top level" % name
+
+        entity = Entity(self.entity_type, 'MUTABLE', {'url': attrs['href']})
+        key = contentstate.add_entity(entity)
+
+        entity_range = EntityRange(key)
+        entity_range.offset = len(state.current_block.text)
+        state.current_block.entity_ranges.append(entity_range)
+        state.current_entity_ranges.append(entity_range)
+
+    def endElement(self, name, state, contentstate):
+        entity_range = state.current_entity_ranges.pop()
+        entity_range.length = len(state.current_block.text) - entity_range.offset
+
+
 ELEMENT_HANDLERS = {
     'ol': ListElementHandler('ordered-list-item'),
     'ul': ListElementHandler('unordered-list-item'),
@@ -111,6 +135,7 @@ ELEMENT_HANDLERS = {
     'em': InlineStyleElementHandler('ITALIC'),
     'b': InlineStyleElementHandler('BOLD'),
     'strong': InlineStyleElementHandler('BOLD'),
+    'a': LinkElementHandler('LINK'),
 }
 
 
