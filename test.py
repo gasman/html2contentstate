@@ -1,7 +1,8 @@
 html = """
 <rich-text-document>
 <p>
-  This paragraph contains <b>bold</b> text, <i>italic</i> text, and <b>bold text which is <i>also</i> italic!</b>
+  This paragraph contains <b>bold</b> text, <i>italic</i> text,
+  and <b>bold text which is <i>also</i> italic!</b>
 </p>
 <p>
   <a href="https://springload.github.io/draftail/">Draftail</a>

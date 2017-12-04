@@ -1,5 +1,4 @@
-import io
-import xml.sax
+from html.parser import HTMLParser
 
 from contentstate import Block, ContentState, Entity, EntityRange, InlineStyleRange
 
@@ -36,7 +35,7 @@ class ListElementHandler(object):
     def __init__(self, list_item_type):
         self.list_item_type = list_item_type
 
-    def startElement(self, name, attrs, state, contentstate):
+    def handle_starttag(self, name, attrs, state, contentstate):
         state.push()
 
         if state.list_item_type is None:
@@ -48,7 +47,7 @@ class ListElementHandler(object):
 
         state.list_item_type = self.list_item_type
 
-    def endElement(self, name, state, contentstate):
+    def handle_endtag(self, name, state, contentstate):
         state.pop()
 
 
@@ -60,12 +59,12 @@ class BlockElementHandler(object):
         assert state.current_block is None, "%s element found nested inside another block" % name
         return Block(self.block_type, depth=state.depth)
 
-    def startElement(self, name, attrs, state, contentstate):
-        block = self.create_block(name, attrs, state, contentstate)
+    def handle_starttag(self, name, attrs, state, contentstate):
+        block = self.create_block(name, dict(attrs), state, contentstate)
         contentstate.blocks.append(block)
         state.current_block = block
 
-    def endElement(self, name, state, contentState):
+    def handle_endtag(self, name, state, contentState):
         assert not state.current_inline_styles, "End of block reached without closing inline style elements"
         assert not state.current_entity_ranges, "End of block reached without closing entity elements"
         state.current_block = None
@@ -86,14 +85,14 @@ class InlineStyleElementHandler(object):
     def __init__(self, style):
         self.style = style
 
-    def startElement(self, name, attrs, state, contentstate):
+    def handle_starttag(self, name, attrs, state, contentstate):
         assert state.current_block is not None, "%s element found at the top level" % name
         inline_style_range = InlineStyleRange(self.style)
         inline_style_range.offset = len(state.current_block.text)
         state.current_block.inline_style_ranges.append(inline_style_range)
         state.current_inline_styles.append(inline_style_range)
 
-    def endElement(self, name, state, contentstate):
+    def handle_endtag(self, name, state, contentstate):
         inline_style_range = state.current_inline_styles.pop()
         assert inline_style_range.style == self.style
         inline_style_range.length = len(state.current_block.text) - inline_style_range.offset
@@ -103,8 +102,9 @@ class LinkElementHandler(object):
     def __init__(self, entity_type):
         self.entity_type = entity_type
 
-    def startElement(self, name, attrs, state, contentstate):
+    def handle_starttag(self, name, attrs, state, contentstate):
         assert state.current_block is not None, "%s element found at the top level" % name
+        attrs = dict(attrs)
 
         entity = Entity(self.entity_type, 'MUTABLE', {'url': attrs['href']})
         key = contentstate.add_entity(entity)
@@ -114,7 +114,7 @@ class LinkElementHandler(object):
         state.current_block.entity_ranges.append(entity_range)
         state.current_entity_ranges.append(entity_range)
 
-    def endElement(self, name, state, contentstate):
+    def handle_endtag(self, name, state, contentstate):
         entity_range = state.current_entity_ranges.pop()
         entity_range.length = len(state.current_block.text) - entity_range.offset
 
@@ -123,10 +123,10 @@ class AtomicBlockEntityElementHandler(object):
     """
     Handler for elements like <img> that exist as a single immutable item at the block level
     """
-    def startElement(self, name, attrs, state, contentstate):
+    def handle_starttag(self, name, attrs, state, contentstate):
         assert state.current_block is None, "%s element found nested inside another block" % name
 
-        entity = self.create_entity(name, attrs, state, contentstate)
+        entity = self.create_entity(name, dict(attrs), state, contentstate)
         key = contentstate.add_entity(entity)
 
         block = Block('atomic', depth=state.depth)
@@ -137,7 +137,7 @@ class AtomicBlockEntityElementHandler(object):
         entity_range.length = 1
         block.entity_ranges.append(entity_range)
 
-    def endElement(self, name, state, contentstate):
+    def handle_endtag(self, name, state, contentstate):
         pass
 
 
@@ -167,33 +167,33 @@ ELEMENT_HANDLERS = {
 }
 
 
-class HtmlToContentStateHandler(xml.sax.ContentHandler):
-    def __init__(self):
+class HtmlToContentStateHandler(HTMLParser):
+    def reset(self):
         self.state = HandlerState()
         self.contentstate = ContentState()
-        super(HtmlToContentStateHandler, self).__init__()
+        super().reset()
 
     def add_block(self, block):
         self.contentstate.blocks.append(block)
         self.current_block = block
 
-    def startElement(self, name, attrs):
+    def handle_starttag(self, name, attrs):
         try:
             element_handler = ELEMENT_HANDLERS[name]
         except KeyError:
             return  # ignore unrecognised elements
 
-        element_handler.startElement(name, attrs, self.state, self.contentstate)
+        element_handler.handle_starttag(name, attrs, self.state, self.contentstate)
 
-    def endElement(self, name):
+    def handle_endtag(self, name):
         try:
             element_handler = ELEMENT_HANDLERS[name]
         except KeyError:
             return  # ignore unrecognised elements
 
-        element_handler.endElement(name, self.state, self.contentstate)
+        element_handler.handle_endtag(name, self.state, self.contentstate)
 
-    def characters(self, content):
+    def handle_data(self, content):
         if self.state.current_block is None:
             assert not content.strip(), "Bare text content found at the top level: %r" % content
 
@@ -202,12 +202,7 @@ class HtmlToContentStateHandler(xml.sax.ContentHandler):
 
 
 def convert(html, **kwargs):
-    parser = xml.sax.make_parser()
-    handler = HtmlToContentStateHandler()
-    parser.setContentHandler(handler)
+    parser = HtmlToContentStateHandler()
+    parser.feed(html)
 
-    # need to wrap input (which may contain multiple top-level elements) in a single
-    # container element so that sax will accept it as a valid XML document
-    parser.parse(io.StringIO("<rich-text-document>%s</rich-text-document>" % html))
-
-    return handler.contentstate.as_json(**kwargs)
+    return parser.contentstate.as_json(**kwargs)
